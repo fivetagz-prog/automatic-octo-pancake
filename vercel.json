@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "functions": {
+    "api/video.js": {
+      "memory": 512,
+      "maxDuration": 30
+    }
+  }
+}
+
