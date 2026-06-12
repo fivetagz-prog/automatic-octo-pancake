@@ -1,6 +1,6 @@
 const https = require("https");
 
-function httpsRequest(url, options = {}) {
+function httpRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, options, (res) => {
       let body = "";
@@ -8,36 +8,8 @@ function httpsRequest(url, options = {}) {
       res.on("end", () => resolve({ statusCode: res.statusCode, body }));
     });
     req.on("error", reject);
-    req.setTimeout(5000, () => { req.destroy(); reject(new Error("Timeout")); });
+    req.setTimeout(6000, () => { req.destroy(); reject(new Error("Timeout")); });
   });
-}
-
-async function getDirectWebm(videoId) {
-  // Rotates across highly available public instances
-  const nodes = [
-    "https://inv.nadeko.net",
-    "https://invidious.nerdvpn.de",
-    "https://invidious.privacydev.net"
-  ];
-
-  for (const node of nodes) {
-    try {
-      const res = await httpsRequest(`${node}/api/v1/videos/${videoId}?local=true`, {
-        headers: { "User-Agent": "Mozilla/5.0" }
-      });
-      if (res.statusCode !== 200) continue;
-      
-      const data = JSON.parse(res.body);
-      const formats = [...(data.formatStreams || []), ...(data.adaptiveFormats || [])];
-      
-      // Strict filtering logic to isolate valid webm video containers
-      const target = formats.find(f => f.url && f.container === "webm" && (f.type || "").includes("video"));
-      if (target && target.url) return target.url;
-    } catch (e) {
-      // Fallback directly to next available node
-    }
-  }
-  return null;
 }
 
 module.exports = async (req, res) => {
@@ -48,18 +20,20 @@ module.exports = async (req, res) => {
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
+  // Fix: Parse query ('q') and page offset directly instead of 'id'
   const { q, page } = req.query;
   if (!q) return res.status(200).json({ success: true, results: [] });
 
   try {
     const API_KEY = "AIzaSyAdOQIPjpABx6-7BpJ27x5PQRxJ2jqQoJs";
-    // Leverages page tokens or maxResults scrolling variations
-    const maxResults = 6;
-    const targetUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=${maxResults}&key=${API_KEY}`;
+    const maxResults = 5;
     
-    const googleRes = await httpsRequest(targetUrl);
+    // Call Official Google API v3 Engine
+    const targetUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=${maxResults}&key=${API_KEY}`;
+    const googleRes = await httpRequest(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+    
     if (googleRes.statusCode !== 200) {
-      return res.status(500).json({ success: false, error: "Google API connection rejected" });
+      return res.status(200).json({ success: false, error: `Google API rejected request: ${googleRes.body}` });
     }
 
     const parsedData = JSON.parse(googleRes.body);
@@ -67,20 +41,41 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, results: [] });
     }
 
-    // Resolves streaming structures in parallel batches
-    const resolvedMatches = await Promise.all(parsedData.items.map(async (item) => {
+    // Process list and extract progressive video file stream extensions (.webm format)
+    const processedResults = await Promise.all(parsedData.items.map(async (item) => {
       const videoId = item.id.videoId;
-      const streamUrl = await getDirectWebm(videoId);
       
+      // Fallback Engine: Uses decentralized stream allocators to fetch unthrottled progressive .webm files
+      let directWebmUrl = "";
+      const nodes = ["https://inv.nadeko.net", "https://invidious.nerdvpn.de", "https://invidious.privacydev.net"];
+      
+      for (const node of nodes) {
+        try {
+          const invidiousRes = await httpRequest(`${node}/api/v1/videos/${videoId}`);
+          if (invidiousRes.statusCode === 200) {
+            const videoDetails = JSON.parse(invidiousRes.body);
+            const checkStreams = [...(videoDetails.formatStreams || []), ...(videoDetails.adaptiveFormats || [])];
+            
+            // Isolate true progressive playback container files
+            const match = checkStreams.find(f => f.url && f.container === "webm" && (f.type || "").includes("video"));
+            if (match && match.url) {
+              directWebmUrl = match.url;
+              break;
+            }
+          }
+        } catch (e) {}
+      }
+
       return {
-        title: item.snippet.title || "Unknown Track",
+        title: item.snippet.title || "Unknown Title",
         id: videoId,
         author: item.snippet.channelTitle || "Unknown Channel",
-        streamUrl: streamUrl || "" // Passed up directly to VideoFrame objects
+        // Direct media content stream URL to bind to VideoFrame.Video properties inside Roblox
+        streamUrl: directWebmUrl || `https://inv.nadeko.net/latest_version?id=${videoId}&itag=243`
       };
     }));
 
-    return res.status(200).json({ success: true, results: resolvedMatches });
+    return res.status(200).json({ success: true, results: processedResults });
 
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
