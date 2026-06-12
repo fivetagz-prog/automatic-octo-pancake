@@ -24,12 +24,13 @@ function httpsGet(url) {
 module.exports = async (req, res) => {
   const { q } = req.query;
 
-  // Fallback to handle old requests or empty searches gracefully
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+
   if (!q) {
     return res.status(200).json({ success: true, results: [] });
   }
 
-  // Curated public nodes handling API search requests cleanly without datacenter blocks
   const searchInstances = [
     "https://inv.thepixora.com",
     "https://invidious.f5.si",
@@ -50,7 +51,6 @@ module.exports = async (req, res) => {
         continue;
       }
 
-      // Format the top results into clean objects for your Roblox Lua list layout
       const structuredMatches = searchData.slice(0, 6).map(video => {
         return {
           title: video.title || "Unknown Title",
@@ -61,15 +61,12 @@ module.exports = async (req, res) => {
         };
       });
 
-      // Clear headers to permit communication with Roblox executors
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Content-Type", "application/json");
-      return res.status(200).json({ success: true, results: ...[structuredMatches] });
+      return res.status(200).json({ success: true, results: structuredMatches });
 
     } catch (e) {
       errors.push(`${instance} failed: ${e.message}`);
     }
   }
 
-  return res.status(500).json({ error: "All backends failed to pull search queries", details: errors });
+  return res.status(500).json({ error: "All backends failed", details: errors });
 };
