@@ -1,9 +1,8 @@
 {
   "version": 2,
-  "functions": {
-    "api/video.js": {
-      "memory": 512,
-      "maxDuration": 30
+  "build": {
+    "env": {
+      "YT_DLP_PATH": "/usr/local/bin/yt-dlp"
     }
   }
 }
