@@ -4,7 +4,7 @@ function httpsGet(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: { 
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" 
       }
     }, (res) => {
       if (res.statusCode !== 200) {
@@ -24,11 +24,12 @@ function httpsGet(url) {
 module.exports = async (req, res) => {
   const { q } = req.query;
 
+  // Fallback to handle old requests or empty searches gracefully
   if (!q) {
-    return res.status(400).json({ error: "Missing search query parameter 'q'" });
+    return res.status(200).json({ success: true, results: [] });
   }
 
-  // Active public instances with reliable, unthrottled API search permissions
+  // Curated public nodes handling API search requests cleanly without datacenter blocks
   const searchInstances = [
     "https://inv.thepixora.com",
     "https://invidious.f5.si",
@@ -44,31 +45,31 @@ module.exports = async (req, res) => {
       const body = await httpsGet(searchUrl);
       
       const searchData = JSON.parse(body);
-      if (!Array.isArray(searchData) || searchData.length === 0) {
-        errors.push(`${instance} returned empty results`);
+      if (!Array.isArray(searchData)) {
+        errors.push(`${instance} did not return an array`);
         continue;
       }
 
-      // Format the top 3 video matches into clean data models for Roblox
-      const structuredMatches = searchData.slice(0, 3).map(video => {
+      // Format the top results into clean objects for your Roblox Lua list layout
+      const structuredMatches = searchData.slice(0, 6).map(video => {
         return {
-          title: video.title,
+          title: video.title || "Unknown Title",
           id: video.videoId,
-          author: video.author,
-          duration: video.lengthSeconds,
-          // Constructs the direct local stream endpoint for video stream rendering
+          author: video.author || "Unknown Channel",
+          duration: video.lengthSeconds || 0,
           streamUrl: `${instance}/latest_version?id=${video.videoId}&itag=22&local=true`
         };
       });
 
-      // Set explicit headers to allow Roblox outbound requests to read responses clearly
+      // Clear headers to permit communication with Roblox executors
       res.setHeader("Access-Control-Allow-Origin", "*");
-      return res.status(200).json({ success: true, results: structuredMatches });
+      res.setHeader("Content-Type", "application/json");
+      return res.status(200).json({ success: true, results: ...[structuredMatches] });
 
     } catch (e) {
       errors.push(`${instance} failed: ${e.message}`);
     }
   }
 
-  return res.status(500).json({ error: "All search backends failed", details: errors });
+  return res.status(500).json({ error: "All backends failed to pull search queries", details: errors });
 };
