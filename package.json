@@ -1,5 +1,9 @@
 {
-  "name": "youblox-proxy",
-  "version": "1.0.0",
-  "dependencies": {}
+  "version": 2,
+  "routes": [
+    {
+      "src": "/api/video",
+      "dest": "/video.js"
+    }
+  ]
 }
