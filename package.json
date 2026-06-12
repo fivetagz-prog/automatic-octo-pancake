@@ -1,0 +1,9 @@
+{
+  "name": "youblox-proxy",
+  "version": "1.0.0",
+  "description": "YouTube .webm proxy for YouBlox Roblox GUI",
+  "dependencies": {
+    "ytdl-core": "^4.11.5"
+  }
+}
+
