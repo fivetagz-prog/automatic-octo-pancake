@@ -19,7 +19,7 @@ function httpsGet(url) {
 }
 
 module.exports = async (req, res) => {
-  // Enforce proper cross-origin headers immediately
+  // Set headers to permit connections across distinct origins
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -45,6 +45,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, results: [] });
     }
 
+    // Process output items array into standardized payload arrays for Luau 
     const structuredMatches = parsedData.items.map(item => {
       return {
         title: item.snippet.title || "Unknown Title",
@@ -58,6 +59,6 @@ module.exports = async (req, res) => {
     return res.status(200).json({ success: true, results: structuredMatches });
 
   } catch (error) {
-    return res.status(500).json({ success: false, error: "Google API Error", details: error.message });
+    return res.status(500).json({ success: false, error: "YouTube API Error", details: error.message });
   }
 };
