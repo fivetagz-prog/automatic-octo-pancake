@@ -4,7 +4,7 @@ function httpsGet(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: { 
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" 
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" 
       }
     }, (res) => {
       if (res.statusCode !== 200) {
@@ -24,6 +24,7 @@ function httpsGet(url) {
 module.exports = async (req, res) => {
   const { q } = req.query;
 
+  // Set explicit headers to allow direct cross-origin execution from Roblox environments
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
 
@@ -31,6 +32,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ success: true, results: [] });
   }
 
+  // Actively maintained, unblocked public instances with search access permitted
   const searchInstances = [
     "https://inv.thepixora.com",
     "https://invidious.f5.si",
@@ -47,10 +49,11 @@ module.exports = async (req, res) => {
       
       const searchData = JSON.parse(body);
       if (!Array.isArray(searchData)) {
-        errors.push(`${instance} did not return an array`);
+        errors.push(`${instance} invalid search format array`);
         continue;
       }
 
+      // Filter and map fields required by your custom UI elements
       const structuredMatches = searchData.slice(0, 6).map(video => {
         return {
           title: video.title || "Unknown Title",
@@ -68,5 +71,5 @@ module.exports = async (req, res) => {
     }
   }
 
-  return res.status(500).json({ error: "All backends failed", details: errors });
+  return res.status(500).json({ error: "All backends failed to resolve search query", details: errors });
 };
