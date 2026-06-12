@@ -1,3 +1,24 @@
+const https = require("https");
+
+function httpsGet(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: { "User-Agent": "Mozilla/5.0" }
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error("HTTP " + res.statusCode));
+        res.resume();
+        return;
+      }
+      let body = "";
+      res.on("data", (chunk) => body += chunk);
+      res.on("end", () => resolve(body));
+    });
+    req.on("error", reject);
+    req.setTimeout(8000, () => { req.destroy(); reject(new Error("Timeout")); });
+  });
+}
+
 module.exports = async (req, res) => {
   const { id } = req.query;
 
@@ -5,52 +26,82 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: "Missing video id" });
   }
 
-  try {
-    // Use Invidious public API to get stream URLs (no API key needed)
-    const instances = [
-      "https://inv.nadeko.net",
-      "https://invidious.fdn.fr",
-      "https://invidious.nerdvpn.de",
-    ];
+  const instances = [
+    "https://inv.nadeko.net",
+    "https://invidious.fdn.fr",
+    "https://invidious.nerdvpn.de",
+    "https://yt.cdaut.de",
+    "https://invidious.privacydev.net"
+  ];
 
-    let data = null;
-    let lastError = null;
+  const errors = [];
 
-    for (const instance of instances) {
+  for (const instance of instances) {
+    try {
+      const body = await httpsGet(instance + "/api/v1/videos/" + id + "?local=true");
+
+      let data;
       try {
-        const response = await fetch(`${instance}/api/v1/videos/${id}?fields=adaptiveFormats,formatStreams`);
-        if (response.ok) {
-          data = await response.json();
-          break;
-        }
-      } catch (e) {
-        lastError = e.message;
+        data = JSON.parse(body);
+      } catch(e) {
+        errors.push(instance + " bad JSON");
+        continue;
       }
+
+      if (!data || (!data.adaptiveFormats && !data.formatStreams)) {
+        errors.push(instance + " empty formats");
+        continue;
+      }
+
+      const adaptive = data.adaptiveFormats || [];
+      const streams = data.formatStreams || [];
+      let best = null;
+
+      // Prefer formatStreams webm (video+audio)
+      for (const sf of streams) {
+        if (sf.url && sf.container === "webm") {
+          if (!best || (sf.resolution && (!best.resolution || sf.resolution > best.resolution))) {
+            best = sf;
+          }
+        }
+      }
+
+      // Fallback: adaptive video webm
+      if (!best) {
+        for (const af of adaptive) {
+          if (af.url && af.container === "webm" && af.type && af.type.includes("video")) {
+            if (!best || (af.bitrate && (!best.bitrate || af.bitrate > best.bitrate))) {
+              best = af;
+            }
+          }
+        }
+      }
+
+      // Fallback: any webm
+      if (!best) {
+        best = adaptive.find(f => f.url && f.container === "webm") || null;
+      }
+
+      // Last fallback: any stream
+      if (!best) {
+        best = streams.find(f => f.url) || null;
+      }
+
+      if (!best || !best.url) {
+        errors.push(instance + " no usable format");
+        continue;
+      }
+
+      return res.status(200).json({
+        url: best.url,
+        quality: best.qualityLabel || best.quality || "unknown",
+        container: best.container || "unknown"
+      });
+
+    } catch(e) {
+      errors.push(instance + " " + e.message);
     }
-
-    if (!data) {
-      return res.status(500).json({ error: "All Invidious instances failed: " + lastError });
-    }
-
-    // Find best webm format
-    const formats = [...(data.adaptiveFormats || []), ...(data.formatStreams || [])];
-    
-    const webm = formats.find(f => f.container === "webm" && f.type?.includes("video")) 
-      || formats.find(f => f.container === "webm")
-      || formats[0];
-
-    if (!webm || !webm.url) {
-      return res.status(404).json({ error: "No suitable format found" });
-    }
-
-    return res.status(200).json({
-      url: webm.url,
-      quality: webm.qualityLabel || webm.quality || "unknown",
-      container: webm.container || "unknown",
-    });
-
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
   }
-};
 
+  return res.status(500).json({ error: "All instances failed", details: errors });
+};
