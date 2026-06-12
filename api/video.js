@@ -3,14 +3,15 @@ const https = require("https");
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error("HTTP " + res.statusCode));
-        res.resume();
-        return;
-      }
       let body = "";
       res.on("data", (chunk) => body += chunk);
-      res.on("end", () => resolve(body));
+      res.on("end", () => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode}: ${body}`));
+          return;
+        }
+        resolve(body);
+      });
     });
     req.on("error", reject);
     req.setTimeout(6000, () => { req.destroy(); reject(new Error("Timeout")); });
@@ -18,12 +19,17 @@ function httpsGet(url) {
 }
 
 module.exports = async (req, res) => {
-  const { q } = req.query;
-
-  // Set cross-origin headers to accept direct exploit requests
+  // Enforce proper cross-origin headers immediately
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Content-Type", "application/json");
 
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  const { q } = req.query;
   if (!q) {
     return res.status(200).json({ success: true, results: [] });
   }
@@ -39,7 +45,6 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, results: [] });
     }
 
-    // Process Google payload structures into clean layout schemas for Luau
     const structuredMatches = parsedData.items.map(item => {
       return {
         title: item.snippet.title || "Unknown Title",
@@ -53,6 +58,6 @@ module.exports = async (req, res) => {
     return res.status(200).json({ success: true, results: structuredMatches });
 
   } catch (error) {
-    return res.status(500).json({ error: "Google API connection failure", details: error.message });
+    return res.status(500).json({ success: false, error: "Google API Error", details: error.message });
   }
 };
