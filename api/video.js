@@ -24,7 +24,6 @@ function httpsGet(url) {
 module.exports = async (req, res) => {
   const { q } = req.query;
 
-  // Set explicit headers to allow direct cross-origin execution from Roblox environments
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
 
@@ -32,7 +31,6 @@ module.exports = async (req, res) => {
     return res.status(200).json({ success: true, results: [] });
   }
 
-  // Actively maintained, unblocked public instances with search access permitted
   const searchInstances = [
     "https://inv.thepixora.com",
     "https://invidious.f5.si",
@@ -53,8 +51,7 @@ module.exports = async (req, res) => {
         continue;
       }
 
-      // Filter and map fields required by your custom UI elements
-      const structuredMatches = searchData.slice(0, 6).map(video => {
+      const structuredMatches = searchData.slice(0, 10).map(video => {
         return {
           title: video.title || "Unknown Title",
           id: video.videoId,
@@ -64,12 +61,12 @@ module.exports = async (req, res) => {
         };
       });
 
-      return res.status(200).json({ success: true, results: structuredMatches });
+      return res.status(200).json({ success: true, results: ...[structuredMatches] });
 
     } catch (e) {
       errors.push(`${instance} failed: ${e.message}`);
     }
   }
 
-  return res.status(500).json({ error: "All backends failed to resolve search query", details: errors });
+  return res.status(500).json({ error: "All backends failed", details: errors });
 };
