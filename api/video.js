@@ -1,5 +1,3 @@
-const ytdl = require("ytdl-core");
-
 module.exports = async (req, res) => {
   const { id } = req.query;
 
@@ -7,38 +5,52 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: "Missing video id" });
   }
 
-  const url = `https://www.youtube.com/watch?v=${id}`;
-
   try {
-    // Validate the video exists
-    const info = await ytdl.getInfo(url);
+    // Use Invidious public API to get stream URLs (no API key needed)
+    const instances = [
+      "https://inv.nadeko.net",
+      "https://invidious.fdn.fr",
+      "https://invidious.nerdvpn.de",
+    ];
 
-    // Get the best audio+video webm format
-    const format = ytdl.chooseFormat(info.formats, {
-      quality: "highestvideo",
-      filter: (f) =>
-        f.container === "webm" &&
-        f.hasVideo &&
-        f.hasAudio,
-    }) || ytdl.chooseFormat(info.formats, {
-      // Fallback: any webm with video
-      filter: (f) => f.container === "webm" && f.hasVideo,
-    }) || ytdl.chooseFormat(info.formats, {
-      // Last fallback: best overall
-      quality: "highest",
-    });
+    let data = null;
+    let lastError = null;
 
-    if (!format || !format.url) {
-      return res.status(404).json({ error: "No streamable format found" });
+    for (const instance of instances) {
+      try {
+        const response = await fetch(`${instance}/api/v1/videos/${id}?fields=adaptiveFormats,formatStreams`);
+        if (response.ok) {
+          data = await response.json();
+          break;
+        }
+      } catch (e) {
+        lastError = e.message;
+      }
     }
 
-    // Return the direct stream URL so Roblox VideoFrame can use it
+    if (!data) {
+      return res.status(500).json({ error: "All Invidious instances failed: " + lastError });
+    }
+
+    // Find best webm format
+    const formats = [...(data.adaptiveFormats || []), ...(data.formatStreams || [])];
+    
+    const webm = formats.find(f => f.container === "webm" && f.type?.includes("video")) 
+      || formats.find(f => f.container === "webm")
+      || formats[0];
+
+    if (!webm || !webm.url) {
+      return res.status(404).json({ error: "No suitable format found" });
+    }
+
     return res.status(200).json({
-      url: format.url,
-      container: format.container,
-      quality: format.qualityLabel || "unknown",
+      url: webm.url,
+      quality: webm.qualityLabel || webm.quality || "unknown",
+      container: webm.container || "unknown",
     });
+
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 };
+
