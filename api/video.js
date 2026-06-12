@@ -1,14 +1,39 @@
 const https = require("https");
 
-function httpRequest(url, options = {}) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, options, (res) => {
+function httpPost(url, payload) {
+  return new Promise((resolve) => {
+    const urlObj = new URL(url);
+    const data = JSON.stringify(payload);
+    
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname,
+      method: "POST",
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Content-Length": data.length,
+        "User-Agent": "Mozilla/5.0"
+      }
+    }, (res) => {
       let body = "";
       res.on("data", (chunk) => body += chunk);
       res.on("end", () => resolve({ statusCode: res.statusCode, body }));
     });
-    req.on("error", reject);
-    req.setTimeout(6000, () => { req.destroy(); reject(new Error("Timeout")); });
+
+    req.on("error", () => resolve({ statusCode: 500, body: "" }));
+    req.write(data);
+    req.end();
+  });
+}
+
+function httpGet(url) {
+  return new Promise((resolve) => {
+    https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => body += chunk);
+      res.on("end", () => resolve({ statusCode: res.statusCode, body }));
+    }).on("error", () => resolve({ statusCode: 500, body: "" }));
   });
 }
 
@@ -20,48 +45,43 @@ module.exports = async (req, res) => {
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  // Fix: Parse query ('q') and page offset directly instead of 'id'
-  const { q, page } = req.query;
+  const { q } = req.query;
   if (!q) return res.status(200).json({ success: true, results: [] });
 
   try {
-    const API_KEY = "AIzaSyAdOQIPjpABx6-7BpJ27x5PQRxJ2jqQoJs";
+    const GOOGLE_API_KEY = "AIzaSyAdOQIPjpABx6-7BpJ27x5PQRxJ2jqQoJs";
     const maxResults = 5;
     
-    // Call Official Google API v3 Engine
-    const targetUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=${maxResults}&key=${API_KEY}`;
-    const googleRes = await httpRequest(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+    // 1. Fetch search metadata from the official Google YouTube v3 Engine
+    const googleUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=${maxResults}&key=${GOOGLE_API_KEY}`;
+    const googleFetch = await httpGet(googleUrl);
     
-    if (googleRes.statusCode !== 200) {
-      return res.status(200).json({ success: false, error: `Google API rejected request: ${googleRes.body}` });
+    if (googleFetch.statusCode !== 200) {
+      return res.status(200).json({ success: false, error: "Google API Key validation or quota failure." });
     }
 
-    const parsedData = JSON.parse(googleRes.body);
-    if (!parsedData.items || !Array.isArray(parsedData.items)) {
+    const searchData = JSON.parse(googleFetch.body);
+    if (!searchData.items || searchData.items.length === 0) {
       return res.status(200).json({ success: true, results: [] });
     }
 
-    // Process list and extract progressive video file stream extensions (.webm format)
-    const processedResults = await Promise.all(parsedData.items.map(async (item) => {
+    // 2. Map items and fetch direct progressive .webm source links from the Stream API
+    const finalTracks = await Promise.all(searchData.items.map(async (item) => {
       const videoId = item.id.videoId;
-      
-      // Fallback Engine: Uses decentralized stream allocators to fetch unthrottled progressive .webm files
-      let directWebmUrl = "";
-      const nodes = ["https://inv.nadeko.net", "https://invidious.nerdvpn.de", "https://invidious.privacydev.net"];
-      
-      for (const node of nodes) {
+      let targetStream = "";
+
+      const cobaltResponse = await httpPost("https://cobalt.tools/api/json", {
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        videoQuality: "720", 
+        downloadMode = "video",
+        filenamePattern = "basic"
+      });
+
+      if (cobaltResponse.statusCode === 200) {
         try {
-          const invidiousRes = await httpRequest(`${node}/api/v1/videos/${videoId}`);
-          if (invidiousRes.statusCode === 200) {
-            const videoDetails = JSON.parse(invidiousRes.body);
-            const checkStreams = [...(videoDetails.formatStreams || []), ...(videoDetails.adaptiveFormats || [])];
-            
-            // Isolate true progressive playback container files
-            const match = checkStreams.find(f => f.url && f.container === "webm" && (f.type || "").includes("video"));
-            if (match && match.url) {
-              directWebmUrl = match.url;
-              break;
-            }
+          const streamData = JSON.parse(cobaltResponse.body);
+          if (streamData && streamData.url) {
+            targetStream = streamData.url; // True progressive .webm link
           }
         } catch (e) {}
       }
@@ -70,14 +90,13 @@ module.exports = async (req, res) => {
         title: item.snippet.title || "Unknown Title",
         id: videoId,
         author: item.snippet.channelTitle || "Unknown Channel",
-        // Direct media content stream URL to bind to VideoFrame.Video properties inside Roblox
-        streamUrl: directWebmUrl || `https://inv.nadeko.net/latest_version?id=${videoId}&itag=243`
+        streamUrl: targetStream
       };
     }));
 
-    return res.status(200).json({ success: true, results: processedResults });
+    return res.status(200).json({ success: true, results: finalTracks });
 
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+  } catch (err) do {
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
